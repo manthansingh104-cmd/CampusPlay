@@ -37,6 +37,7 @@ import {
   StatusPill,
 } from "../components/UI";
 import { FixtureRow } from "../components/FixtureRow";
+import { TodayFixturesCard } from "../components/TodayFixturesCard";
 import { Modal } from "../components/UI";
 import {
   countRegistrationParticipants,
@@ -45,10 +46,7 @@ import {
   getRegistrationAudienceIds,
   getTeamAudienceIds,
 } from "../services/domain";
-import { tournamentService } from "../services/tournamentService";
-import { registrationService } from "../services/registrationService";
-import { matchService } from "../services/matchService";
-import type { Match, Registration, Sport, Tournament } from "../types";
+import type { AppData, Match, Registration, Sport, Tournament } from "../types";
 
 const sportOptions: Sport[] = [
   "Cricket",
@@ -84,23 +82,36 @@ const displayTime = (time: string) => {
 };
 const labelClass = "mb-1.5 block text-[11px] font-bold";
 
+/** Keep organiser pages and their related records inside the sport selected at registration.
+ * Organiser demo accounts without a registered sport retain the all-sports overview.
+ */
+function scopeToOrganizerSport(data: AppData, sport?: string): AppData {
+  if (!sport || !sportOptions.includes(sport as Sport)) return data;
+  const tournaments = data.tournaments.filter((item) => item.sport === sport);
+  const tournamentIds = new Set(tournaments.map((item) => item.id));
+  return {
+    ...data,
+    tournaments,
+    teams: data.teams.filter((item) => tournamentIds.has(item.tournamentId)),
+    matches: data.matches.filter((item) => tournamentIds.has(item.tournamentId)),
+    registrations: data.registrations.filter((item) => tournamentIds.has(item.tournamentId)),
+  };
+}
+
 export function OrganizerDashboard() {
-  const { data, user } = useApp();
-  const sportTournaments = data.tournaments.filter(t => !user?.sport || t.sport === user.sport);
-  const sportTournamentIds = new Set(sportTournaments.map(t => t.id));
-  const scopedMatches = data.matches.filter(m => sportTournamentIds.has(m.tournamentId));
-  const scopedRegistrations = data.registrations.filter(r => sportTournamentIds.has(r.tournamentId));
-  const active = sportTournaments.filter(
+  const { data: allData, user } = useApp();
+  const data = scopeToOrganizerSport(allData, user?.sport);
+  const active = data.tournaments.filter(
     (item) => item.status !== "completed",
   ).length;
-  const upcoming = scopedMatches.filter(
+  const upcoming = data.matches.filter(
     (item) => item.status === "upcoming",
   ).length;
-  const completed = scopedMatches.filter(
+  const completed = data.matches.filter(
     (item) => item.status === "completed",
   ).length;
-  const participants = countUniqueParticipants({ ...data, registrations: scopedRegistrations });
-  const pending = scopedRegistrations.filter(
+  const participants = countUniqueParticipants(data);
+  const pending = data.registrations.filter(
     (item) => item.status === "pending",
   );
   return (
@@ -111,13 +122,13 @@ export function OrganizerDashboard() {
         <div className="relative flex flex-wrap items-end justify-between gap-5">
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-[.2em] text-lime">
-              {user?.sport ? `${user.sport} organiser` : "Sports committee · Control room"}
+              {user?.sport ? `${user.sport} · organiser control room` : "Sports committee · Control room"}
             </p>
             <h1 className="mt-2 text-3xl font-black tracking-[-.06em] sm:text-[40px]">
-              Welcome, {user?.name ?? "organiser"}
+              Organizer dashboard
             </h1>
             <p className="mt-2 max-w-lg text-sm text-white/60">
-              {user?.sport ? `Your ${user.sport} tournaments, teams, fixtures and scores.` : "A clear view of every tournament, team, venue and score."}
+              {user?.sport ? `A focused view of ${user.sport} tournaments, teams, venues and scores.` : "A clear view of every tournament, team, venue and score."}
             </p>
           </div>
           <Link to="/organizer/create" className="btn-primary">
@@ -152,6 +163,7 @@ export function OrganizerDashboard() {
           
         />
       </section>
+      <TodayFixturesCard matches={data.matches} audience="organizer" />
       <div className="grid gap-6 lg:grid-cols-[1.25fr_.75fr]">
         <section>
           <div className="mb-3 flex items-end justify-between">
@@ -268,7 +280,7 @@ export function OrganizerDashboard() {
           </Link>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {sportTournaments.slice(0, 3).map((item) => (
+          {data.tournaments.slice(0, 3).map((item) => (
             <Link
               key={item.id}
               to={`/organizer/manage/${item.id}`}
@@ -320,38 +332,43 @@ const blankTournament: TournamentForm = {
 };
 
 export function CreateTournament() {
-  const { refreshData, showToast, user } = useApp();
+  const { user, updateData, showToast } = useApp();
   const navigate = useNavigate();
-  const [form, setForm] = useState<TournamentForm>(() => ({ ...blankTournament, ...(user?.sport ? { sport: user.sport } : {}) }));
+  const registeredSport = sportOptions.includes(user?.sport as Sport) ? user?.sport as Sport : undefined;
+  const [form, setForm] = useState<TournamentForm>(() => ({
+    ...blankTournament,
+    ...(registeredSport ? { sport: registeredSport } : {}),
+  }));
   const set = <K extends keyof TournamentForm>(
     key: K,
     value: TournamentForm[K],
   ) => setForm((current) => ({ ...current, [key]: value }));
-  const submit = async (event: FormEvent) => {
+  const submit = (event: FormEvent) => {
     event.preventDefault();
-    try {
-      const created = await tournamentService.createTournament({
-        ...form,
-        description:
-          form.description ||
-          `Join the ${form.name} and represent your class in this season’s campus ${form.sport.toLowerCase()} series.`,
-        status: "registration_open",
-        registrationDeadline: form.registrationDeadline,
-        organizer: "",
-        rules: form.rules
-          .split("\n")
-          .map((rule) => rule.trim())
-          .filter(Boolean),
-        imageTone: ["tone-lime", "tone-blue", "tone-orange", "tone-purple"][
-          Math.floor(Math.random() * 4)
-        ],
-      });
-      await refreshData();
-      showToast("Tournament created — students can see it now");
-      navigate(`/organizer/manage/${created.id}`);
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to create tournament");
-    }
+    const id = `tournament-local-${Date.now()}`;
+    const item: Tournament = {
+      ...form,
+      id,
+      description:
+        form.description ||
+        `Join the ${form.name} and represent your class in this season’s campus ${form.sport.toLowerCase()} series.`,
+      status: "registration_open",
+      registrationDeadline: form.registrationDeadline,
+      organizer: "Sports Committee",
+      rules: form.rules
+        .split("\n")
+        .map((rule) => rule.trim())
+        .filter(Boolean),
+      imageTone: ["tone-lime", "tone-blue", "tone-orange", "tone-purple"][
+        Math.floor(Math.random() * 4)
+      ],
+    };
+    updateData((current) => ({
+      ...current,
+      tournaments: [item, ...current.tournaments],
+    }));
+    showToast("Tournament created — students can see it now");
+    navigate(`/organizer/manage/${id}`);
   };
   return (
     <>
@@ -392,13 +409,12 @@ export function CreateTournament() {
                 <span className={labelClass}>Sport</span>
                 <select
                   className="input-field"
-                  disabled={Boolean(user?.sport)}
-                  value={user?.sport ?? form.sport}
+                  value={form.sport}
                   onChange={(event) =>
                     set("sport", event.target.value as Sport)
                   }
                 >
-                  {sportOptions.map((sport) => (
+                  {(registeredSport ? [registeredSport] : sportOptions).map((sport) => (
                     <option key={sport}>{sport}</option>
                   ))}
                 </select>
@@ -596,7 +612,8 @@ export function CreateTournament() {
 
 export function ManageTournament() {
   const { id = "" } = useParams();
-  const { data, updateData, refreshData, showToast } = useApp();
+  const { data: allData, user, updateData, showToast } = useApp();
+  const data = scopeToOrganizerSport(allData, user?.sport);
   const navigate = useNavigate();
   const tournament = data.tournaments.find((item) => item.id === id);
   const [tab, setTab] = useState("Overview");
@@ -645,39 +662,45 @@ export function ManageTournament() {
   );
   const teams = data.teams.filter((item) => item.tournamentId === id);
   const matches = data.matches.filter((item) => item.tournamentId === id);
-  const remove = async () => {
+  const remove = () => {
     if (
       !window.confirm(
-        `Delete “${tournament.name}” and its associated registrations, teams and fixtures?`,
+        `Delete “${tournament.name}” and its ${registrations.length} registrations, ${teams.length} teams and ${matches.length} fixtures from this browser demo?`,
       )
     )
       return;
-    try {
-      await tournamentService.deleteTournament(id);
-      await refreshData();
-      showToast("Tournament and related records removed");
-      navigate("/organizer");
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to delete tournament");
-    }
+    updateData((current) => ({
+      ...current,
+      tournaments: current.tournaments.filter((item) => item.id !== id),
+      teams: current.teams.filter((item) => item.tournamentId !== id),
+      registrations: current.registrations.filter(
+        (item) => item.tournamentId !== id,
+      ),
+      matches: current.matches.filter((item) => item.tournamentId !== id),
+    }));
+    showToast("Tournament and related records removed");
+    navigate("/organizer");
   };
-  const save = async (event: FormEvent) => {
+  const save = (event: FormEvent) => {
     event.preventDefault();
-    try {
-      await tournamentService.updateTournament(id, {
-        ...form,
-        maxTeams: Number(form.maxTeams),
-        playersPerTeam: Number(form.playersPerTeam),
-        rules: form.rules
-          .split("\n")
-          .map((rule) => rule.trim())
-          .filter(Boolean),
-      });
-      await refreshData();
-      showToast("Tournament details saved");
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to update tournament");
-    }
+    updateData((current) => ({
+      ...current,
+      tournaments: current.tournaments.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              ...form,
+              maxTeams: Number(form.maxTeams),
+              playersPerTeam: Number(form.playersPerTeam),
+              rules: form.rules
+                .split("\n")
+                .map((rule) => rule.trim())
+                .filter(Boolean),
+            }
+          : item,
+      ),
+    }));
+    showToast("Tournament details saved");
   };
   const tabs = [
     "Overview",
@@ -783,7 +806,9 @@ export function ManageTournament() {
                     set("sport", event.target.value as Sport)
                   }
                 >
-                  {sportOptions.map((sport) => (
+                  {(user?.sport && sportOptions.includes(user.sport as Sport)
+                  ? [user.sport as Sport]
+                  : sportOptions).map((sport) => (
                     <option key={sport}>{sport}</option>
                   ))}
                 </select>
@@ -1083,7 +1108,8 @@ export function ManageTournament() {
 }
 
 export function ManageRegistrations() {
-  const { data, refreshData, showToast } = useApp();
+  const { data: allData, user, updateData, showToast } = useApp();
+  const data = scopeToOrganizerSport(allData, user?.sport);
   const [filter, setFilter] = useState("All");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1111,21 +1137,40 @@ export function ManageRegistrations() {
   const selectedTeam = selected
     ? data.teams.find((team) => team.id === selected.teamId)
     : undefined;
-  const setStatus = async (
+  const setStatus = (
     registration: Registration,
     status: "approved" | "rejected",
   ) => {
-    try {
-      await registrationService.updateRegistrationStatus(registration.id, status);
-      await refreshData();
-      showToast(
-        status === "approved"
-          ? `${selectedTeam?.name ?? "Team"} approved`
-          : `${selectedTeam?.name ?? "Registration"} declined`,
-      );
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to update registration status");
-    }
+    const team = data.teams.find((item) => item.id === registration.teamId);
+    const tournament = data.tournaments.find(
+      (item) => item.id === registration.tournamentId,
+    );
+    const targetUserIds = getRegistrationAudienceIds(data, registration);
+    updateData((current) => ({
+      ...current,
+      registrations: current.registrations.map((item) =>
+        item.id === registration.id ? { ...item, status } : item,
+      ),
+      notifications: [
+        {
+          id: `notice-${Date.now()}`,
+          title:
+            status === "approved"
+              ? "Your team was approved!"
+              : "Registration update",
+          body: `${team?.name ?? "Your roster"} · ${tournament?.name ?? "CampusPlay"} · ${status === "approved" ? "approved" : "not approved"}`,
+          kind: "registration",
+          time: "Just now",
+          targetUserIds,
+        },
+        ...current.notifications,
+      ],
+    }));
+    showToast(
+      status === "approved"
+        ? `${team?.name ?? "Team"} approved`
+        : `${team?.name ?? "Registration"} declined`,
+    );
   };
   return (
     <>
@@ -1324,7 +1369,8 @@ export function ManageRegistrations() {
 }
 
 export function ManageFixtures() {
-  const { data, refreshData, showToast } = useApp();
+  const { data: allData, user, updateData, showToast } = useApp();
+  const data = scopeToOrganizerSport(allData, user?.sport);
   const initialTournamentId = data.tournaments[0]?.id ?? "";
   const initialTournamentTeams = data.teams.filter(
     (team) => team.tournamentId === initialTournamentId,
@@ -1347,7 +1393,7 @@ export function ManageFixtures() {
       (match) => filter === "All" || match.status === filter.toLowerCase(),
     )
     .sort((a, b) => a.date.localeCompare(b.date));
-  const createMatch = async (event: FormEvent) => {
+  const createMatch = (event: FormEvent) => {
     event.preventDefault();
     if (
       teamsForTournament.length < 2 ||
@@ -1374,23 +1420,35 @@ export function ManageFixtures() {
       );
       return;
     }
-    try {
-      await matchService.createMatch({
-        tournamentId,
-        round,
-        teamAId,
-        teamBId,
-        date,
-        time: displayTime(time),
-        venue,
-        status: "upcoming",
-      });
-      await refreshData();
-      setConflict("");
-      showToast("Fixture created — it is now visible to students");
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to create fixture");
-    }
+    const created: Match = {
+      id: `match-local-${Date.now()}`,
+      tournamentId,
+      round,
+      teamAId,
+      teamBId,
+      date,
+      time: displayTime(time),
+      venue,
+      status: "upcoming",
+    };
+    const targetUserIds = getTeamAudienceIds(data, [teamAId, teamBId]);
+    updateData((current) => ({
+      ...current,
+      matches: [created, ...current.matches],
+      notifications: [
+        {
+          id: `notice-${Date.now()}`,
+          title: "A new fixture is on the board",
+          body: `${data.teams.find((team) => team.id === teamAId)?.name} vs ${data.teams.find((team) => team.id === teamBId)?.name} · ${dateLabel(date)} · ${displayTime(time)} · ${venue}`,
+          kind: "match",
+          time: "Just now",
+          targetUserIds,
+        },
+        ...current.notifications,
+      ],
+    }));
+    setConflict("");
+    showToast("Fixture created — it is now visible to students");
   };
   return (
     <>
@@ -1585,7 +1643,8 @@ export function ManageFixtures() {
 }
 
 export function ManageResults() {
-  const { data, refreshData, showToast } = useApp();
+  const { data: allData, user, updateData, showToast } = useApp();
+  const data = scopeToOrganizerSport(allData, user?.sport);
   const eligible = data.matches.filter(
     (match) => match.status === "upcoming" || match.status === "live",
   );
@@ -1593,25 +1652,60 @@ export function ManageResults() {
   const [scoreA, setScoreA] = useState("78");
   const [scoreB, setScoreB] = useState("72");
   const current = eligible.find((match) => match.id === matchId);
-  const publish = async (event: FormEvent) => {
+  const publish = (event: FormEvent) => {
     event.preventDefault();
     if (!current) return;
     const actualWinner =
       Number(scoreA) >= Number(scoreB) ? current.teamAId : current.teamBId;
+    const publishedWinner = actualWinner;
     const nextMatch = eligible.find((match) => match.id !== matchId);
-    try {
-      await matchService.submitResult(matchId, {
-        scoreA,
-        scoreB,
-        winnerId: actualWinner,
-        notice: "Result published on CampusPlay",
-      });
-      await refreshData();
-      setMatchId(nextMatch?.id ?? "");
-      showToast("Result published to the student dashboard");
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to publish result");
-    }
+    updateData((state) =>
+      state.matches.find((match) => match.id === matchId)?.status ===
+      "completed"
+        ? state
+        : {
+            ...state,
+            matches: state.matches.map((match) =>
+              match.id === matchId
+                ? {
+                    ...match,
+                    scoreA,
+                    scoreB,
+                    winnerId: publishedWinner,
+                    status: "completed",
+                  }
+                : match,
+            ),
+            teams: state.teams.map((team) => {
+              if (team.id !== current.teamAId && team.id !== current.teamBId)
+                return team;
+              const won = team.id === publishedWinner;
+              return {
+                ...team,
+                played: team.played + 1,
+                wins: team.wins + Number(won),
+                losses: team.losses + Number(!won),
+                points: team.points + (won ? 3 : 0),
+              };
+            }),
+            notifications: [
+              {
+                id: `notice-${Date.now()}`,
+                title: "A match result is in",
+                body: `${state.teams.find((team) => team.id === publishedWinner)?.name} takes the win · final score ${scoreA}–${scoreB}`,
+                kind: "reminder",
+                time: "Just now",
+                targetUserIds: getTeamAudienceIds(state, [
+                  current.teamAId,
+                  current.teamBId,
+                ]),
+              },
+              ...state.notifications,
+            ],
+          },
+    );
+    setMatchId(nextMatch?.id ?? "");
+    showToast("Result published to the student dashboard");
   };
   return (
     <>
@@ -1768,8 +1862,11 @@ export function ManageResults() {
 }
 
 export function Analytics() {
-  const { data } = useApp();
-  const sportStats = sportOptions.map((sport) => ({
+  const { data: allData, user } = useApp();
+  const data = scopeToOrganizerSport(allData, user?.sport);
+  const sportStats = (user?.sport && sportOptions.includes(user.sport as Sport)
+    ? [user.sport as Sport]
+    : sportOptions).map((sport) => ({
     sport: sport === "Table Tennis" ? "Table tennis" : sport,
     participants: countRegistrationParticipants(
       data.registrations.filter(

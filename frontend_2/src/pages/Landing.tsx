@@ -23,7 +23,7 @@ export function Landing() {
   };
   return (
     <div className="relative min-h-screen overflow-hidden bg-cover bg-center"
-    style={{backgroundImage : "url('/login image.png')"}}>
+    style={{backgroundImage : "url('/public/login image.png')"}}>
       <div className="absolute inset-0 bg-black/50" />
       <header className="relative z-20 mx-auto flex max-w-[1400px] items-center justify-between px-5 py-5 sm:px-10 mt-3">
         <Brand />

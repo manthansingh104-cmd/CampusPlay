@@ -10,7 +10,7 @@ export interface User {
   email: string
   collegeId: string
   department: string
-  sport?: Sport
+  sport: string
   year: string
   section: string
   role: Role

@@ -40,7 +40,7 @@ import {
   getRegistrationBlockReason,
   getStudentTeamIds,
 } from "../services/domain";
-import { registrationService } from "../services/registrationService";
+import { getLocalDateKey, TodayFixturesCard } from "../components/TodayFixturesCard";
 
 const sports: Array<Sport | "All sports"> = [
   "All sports",
@@ -211,7 +211,7 @@ function RegisterModal({
   tournament: Tournament;
   onClose: () => void;
 }) {
-  const { data, user, refreshData, showToast } = useApp();
+  const { data, user, updateData, showToast } = useApp();
   const [teamName, setTeamName] = useState(
     user?.department.includes("Computer")
       ? "CSE Night Owls"
@@ -225,7 +225,7 @@ function RegisterModal({
   const isIndividual =
     tournament.registrationType === "Individual" ||
     (tournament.registrationType === "Both" && mode === "individual");
-  const submit = async (event: FormEvent) => {
+  const submit = (event: FormEvent) => {
     event.preventDefault();
     const currentTournament =
       data.tournaments.find((item) => item.id === tournament.id) ?? tournament;
@@ -265,26 +265,103 @@ function RegisterModal({
         return;
       }
     }
-    try {
-      await registrationService.createRegistration({
-        tournamentId: tournament.id,
-        type: isIndividual ? "individual" : "team",
-        teamName: isIndividual ? undefined : teamName.trim(),
-        playerNames: isIndividual ? [captainName.trim()] : playerNames,
-        captainName: captainName.trim(),
-      });
-      await refreshData();
-      setError("");
-      setSuccess(true);
-      showToast(
-        isIndividual
-          ? "You’re registered for the event"
-          : "Registration sent to the sports committee",
-      );
-      setTimeout(onClose, 1200);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Registration failed");
-    }
+    const timestamp = Date.now();
+    const rosterUsers: User[] = isIndividual
+      ? []
+      : playerNames.map(
+          (name, index) =>
+            data.users.find(
+              (candidate) =>
+                candidate.name.toLowerCase() === name.toLowerCase(),
+            ) ?? {
+              id: `roster-${timestamp}-${index}`,
+              name,
+              email: `${name.toLowerCase().replace(/[^a-z0-9]+/g, ".")}.${timestamp}.${index}@campusplay.demo`,
+              collegeId: `CP-R${timestamp.toString().slice(-6)}${index}`,
+              department: user?.department ?? "Campus",
+              sport: tournament.sport,
+              year: user?.year ?? "1st Year",
+              section: user?.section ?? "A",
+              role: "student",
+              avatarColor: "#d5f28d",
+            },
+        );
+    const newRosterUsers = rosterUsers.filter(
+      (rosterUser) =>
+        !data.users.some((candidate) => candidate.id === rosterUser.id),
+    );
+    const captainUser = rosterUsers.find(
+      (rosterUser) =>
+        rosterUser.name.toLowerCase() === captainName.trim().toLowerCase(),
+    );
+    const id = `reg-${timestamp}`;
+    const teamId = isIndividual ? undefined : `team-local-${timestamp}`;
+    const studentId = user?.id ?? "student-01";
+    const registration: Registration = {
+      id,
+      tournamentId: tournament.id,
+      teamId,
+      studentId,
+      type: isIndividual ? "individual" : "team",
+      status: isIndividual ? "confirmed" : "pending",
+      createdAt: new Date().toISOString().slice(0, 10),
+      playerNames: isIndividual ? [captainName.trim()] : playerNames,
+    };
+    const createdTeam: Team | undefined = teamId
+      ? {
+          id: teamId,
+          name: teamName.trim(),
+          tournamentId: tournament.id,
+          department: user?.department ?? "Campus",
+          captainId: captainUser?.id ?? studentId,
+          playerIds: rosterUsers.map((rosterUser) => rosterUser.id),
+          played: 0,
+          wins: 0,
+          losses: 0,
+          points: 0,
+          initials: teamName
+            .trim()
+            .split(" ")
+            .map((word) => word[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase(),
+          color: "#d5f28d",
+        }
+      : undefined;
+    const targets = Array.from(
+      new Set([
+        studentId,
+        ...rosterUsers.map((rosterUser) => rosterUser.id),
+        "organizer-demo",
+      ]),
+    );
+    updateData((current) => ({
+      ...current,
+      users: [...newRosterUsers, ...current.users],
+      registrations: [registration, ...current.registrations],
+      teams: createdTeam ? [createdTeam, ...current.teams] : current.teams,
+      notifications: [
+        {
+          id: `notice-${timestamp}`,
+          title: isIndividual
+            ? "A player joined the roster"
+            : "New team registration",
+          body: `${isIndividual ? captainName : teamName} · ${tournament.name}`,
+          kind: "registration",
+          time: "Just now",
+          targetUserIds: targets,
+        },
+        ...current.notifications,
+      ],
+    }));
+    setError("");
+    setSuccess(true);
+    showToast(
+      isIndividual
+        ? "You’re registered for the event"
+        : "Registration sent to the sports committee",
+    );
   };
   const listedPlayers = playersText
     .split("\n")
@@ -433,7 +510,7 @@ function RegisterModal({
 
 export function StudentDashboard() {
   const { data, user } = useApp();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalDateKey();
   const myRegistrations = data.registrations.filter(
     (registration) => registration.studentId === user?.id,
   );
@@ -472,7 +549,11 @@ export function StudentDashboard() {
         <div className="absolute right-8 -top-16 h-52 w-52 rounded-full border border-[#263a20]/10" />
         <div className="relative flex flex-wrap items-end justify-between gap-5">
           <div>
-            <p className="eyebrow !text-[#33452b]">Friday · 13 November 2026</p>
+            <p className="eyebrow !text-[#33452b]">
+              {new Date(`${today}T00:00:00`).toLocaleDateString("en-GB", {
+                weekday: "long", day: "numeric", month: "long", year: "numeric",
+              }).replace(",", " ·")}
+            </p>
             <h1 className="mt-2 text-3xl font-black tracking-[-.06em] text-[#1d2b20] sm:text-[42px]">
               Good morning, {userName}
             </h1>
@@ -514,6 +595,7 @@ export function StudentDashboard() {
           icon={<Trophy size={18} />}
         />
       </section>
+      <TodayFixturesCard matches={data.matches} audience="student" />
       <section className="grid gap-6 xl:grid-cols-[1.45fr_.8fr]">
         <div>
           <div className="mb-4 flex items-end justify-between gap-3">

@@ -50,6 +50,7 @@ const students: User[] = names.map((name, i) => ({
   email: `${name.toLowerCase().replace(/ /g, '.')}@campus.edu`,
   collegeId: `CP${String(240100 + i).slice(2)}`,
   department: departments[i % departments.length],
+  sport: '',
   year: `${(i % 4) + 1}${['st', 'nd', 'rd', 'th'][i % 4]} Year`,
   section: ['A', 'B', 'C'][i % 3],
   role: 'student',
@@ -58,7 +59,7 @@ const students: User[] = names.map((name, i) => ({
 
 const organizer: User = {
   id: 'organizer-demo', name: 'Rhea Kapoor', email: 'sports@campus.edu', collegeId: 'CP-SPORTS',
-  department: 'Sports Committee', year: 'Coordinator', section: '—', role: 'organizer', avatarColor: '#d5f28d',
+  department: 'Sports Committee', sport: '', year: 'Coordinator', section: '—', role: 'organizer', avatarColor: '#d5f28d',
 }
 
 const teamSpecs: Array<[string, string, number, number]> = [

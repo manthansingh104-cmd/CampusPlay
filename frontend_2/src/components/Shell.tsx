@@ -16,6 +16,7 @@ import {
   Command,
   Compass,
   Crown,
+  Download,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -33,7 +34,6 @@ import { useApp } from "../app/AppContext";
 import { Avatar, SportIcon } from "./UI";
 import type { Tournament, Team, Match, Notice } from "../types";
 import { getStudentTeamIds } from "../services/domain";
-import { notificationService } from "../services/notificationService";
 
 const studentLinks = [
   { label: "Overview", to: "/app", icon: LayoutDashboard, exact: true },
@@ -50,6 +50,7 @@ const organizerLinks = [
   { label: "Fixtures", to: "/organizer/fixtures", icon: CalendarDays },
   { label: "Results", to: "/organizer/results", icon: Trophy },
   { label: "Analytics", to: "/organizer/analytics", icon: Activity },
+  { label: "Exports", to: "/organizer/exports", icon: Download },
 ];
 
 export function Brand({ inverse = false }: { inverse?: boolean }) {
@@ -164,7 +165,26 @@ function Sidebar() {
 }
 
 function SearchBox({ mobile = false }: { mobile?: boolean }) {
-  const { data } = useApp();
+  const { data, role, user } = useApp();
+  const visibleTournaments = role === "organizer" && user?.sport
+    ? data.tournaments.filter((item) => item.sport === user.sport)
+    : data.tournaments;
+  const visibleTournamentIds = new Set(visibleTournaments.map((item) => item.id));
+  const visibleTeams = role === "organizer" && user?.sport
+    ? data.teams.filter((team) => visibleTournamentIds.has(team.tournamentId))
+    : data.teams;
+  const visibleMatches = role === "organizer" && user?.sport
+    ? data.matches.filter((match) => visibleTournamentIds.has(match.tournamentId))
+    : data.matches;
+  const visibleUserIds = role === "organizer" && user?.sport
+    ? new Set([
+        ...visibleTeams.flatMap((team) => [team.captainId, ...team.playerIds]),
+        ...data.registrations.filter((registration) => visibleTournamentIds.has(registration.tournamentId)).map((registration) => registration.studentId),
+      ])
+    : undefined;
+  const visibleUsers = visibleUserIds
+    ? data.users.filter((entry) => visibleUserIds.has(entry.id))
+    : data.users;
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const location = useLocation();
@@ -172,7 +192,7 @@ function SearchBox({ mobile = false }: { mobile?: boolean }) {
     if (query.trim().length < 2) return [];
     const term = query.toLowerCase();
     return [
-      ...data.tournaments
+      ...visibleTournaments
         .filter(
           (item) =>
             item.name.toLowerCase().includes(term) ||
@@ -186,7 +206,7 @@ function SearchBox({ mobile = false }: { mobile?: boolean }) {
           to: `/app/tournaments/${item.id}`,
           icon: "🏆",
         })),
-      ...data.teams
+      ...visibleTeams
         .filter((item) => item.name.toLowerCase().includes(term))
         .slice(0, 2)
         .map((item: Team) => ({
@@ -195,20 +215,20 @@ function SearchBox({ mobile = false }: { mobile?: boolean }) {
           to: "/app/leaderboard",
           icon: "👥",
         })),
-      ...data.matches
+      ...visibleMatches
         .filter((item) =>
-          `${data.teams.find((team) => team.id === item.teamAId)?.name} ${data.teams.find((team) => team.id === item.teamBId)?.name} ${item.venue}`
+          `${visibleTeams.find((team) => team.id === item.teamAId)?.name} ${visibleTeams.find((team) => team.id === item.teamBId)?.name} ${item.venue}`
             .toLowerCase()
             .includes(term),
         )
         .slice(0, 2)
         .map((item: Match) => ({
-          label: `${data.teams.find((team) => team.id === item.teamAId)?.name} vs ${data.teams.find((team) => team.id === item.teamBId)?.name}`,
+          label: `${visibleTeams.find((team) => team.id === item.teamAId)?.name} vs ${visibleTeams.find((team) => team.id === item.teamBId)?.name}`,
           sub: `${item.date} · match`,
           to: "/app/matches",
           icon: "📅",
         })),
-      ...data.users
+      ...visibleUsers
         .filter((item) => item.name.toLowerCase().includes(term))
         .slice(0, 2)
         .map((item) => ({
@@ -218,7 +238,7 @@ function SearchBox({ mobile = false }: { mobile?: boolean }) {
           icon: "🙂",
         })),
     ].slice(0, 6);
-  }, [data, query]);
+  }, [data, query, role, user?.sport, visibleTournaments, visibleTeams, visibleMatches, visibleUsers]);
   return (
     <div
       className={`relative w-full ${mobile ? "max-w-none" : "hidden max-w-[430px] md:block"}`}
@@ -287,7 +307,7 @@ function SearchBox({ mobile = false }: { mobile?: boolean }) {
 }
 
 function Topbar() {
-  const { user, role, toggleTheme, data, refreshData, signInDemo, showToast } = useApp();
+  const { user, role, toggleTheme, data, updateData, showToast } = useApp();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [mobileSearch, setMobileSearch] = useState(false);
@@ -302,24 +322,34 @@ function Topbar() {
     (notice) => !isReadForCurrentUser(notice),
   ).length;
   const navigate = useNavigate();
-  const markAll = async () => {
-    try {
-      await notificationService.markAllAsRead();
-      await refreshData();
-      showToast("All notifications marked as read");
-    } catch {
-      // Ignore
-    }
-  };
-  const switchRole = async () => {
+  const markAll = () =>
+    updateData((current) => ({
+      ...current,
+      notifications: current.notifications.map((notice) => {
+        if (
+          notice.targetUserIds &&
+          !notice.targetUserIds.includes(currentUserId)
+        )
+          return notice;
+        return {
+          ...notice,
+          readByUserIds: Array.from(
+            new Set([...(notice.readByUserIds ?? []), currentUserId]),
+          ),
+        };
+      }),
+    }));
+  const switchRole = () => {
     const next = role === "student" ? "organizer" : "student";
-    try {
-      await signInDemo(next);
-      navigate(next === "student" ? "/app" : "/organizer");
-      showToast(`Switched to ${next} demo`);
-    } catch {
-      // Ignore
-    }
+    updateData((current) => ({
+      ...current,
+      session: {
+        userId: next === "student" ? "student-01" : "organizer-demo",
+        role: next,
+      },
+    }));
+    navigate(next === "student" ? "/app" : "/organizer");
+    showToast(`Switched to ${next} demo`);
     setProfileOpen(false);
   };
   return (
@@ -476,6 +506,7 @@ function MobileNav() {
           { to: "/organizer/registrations", label: "Teams", icon: Users },
           { to: "/organizer/fixtures", label: "Fixtures", icon: CalendarDays },
           { to: "/organizer/results", label: "Results", icon: Trophy },
+          { to: "/organizer/exports", label: "Exports", icon: Download },
         ]
       : [
           { to: "/app", label: "Home", icon: LayoutDashboard },
