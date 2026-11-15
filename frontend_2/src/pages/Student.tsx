@@ -903,7 +903,7 @@ export function Tournaments() {
 
 export function TournamentDetails() {
   const { id = "" } = useParams();
-  const { data, showToast } = useApp();
+  const { data, showToast, role } = useApp();
   const tournament = data.tournaments.find((item) => item.id === id);
   const [tab, setTab] = useState("Overview");
   const [register, setRegister] = useState(false);
@@ -1161,6 +1161,7 @@ export function TournamentDetails() {
             ))}
         </div>
         <aside className="space-y-3">
+          {role === "student" && (
           <div className="surface rounded-[22px] p-5">
             <p className="eyebrow">Join the lineup</p>
             <p className="mt-2 text-xl font-extrabold">Ready to play?</p>
@@ -1196,6 +1197,7 @@ export function TournamentDetails() {
               Registration closes {dateLabel(tournament.registrationDeadline)}
             </p>
           </div>
+          )}
           <div className="surface rounded-[22px] p-5">
             <p className="eyebrow">Event coordinator</p>
             <div className="mt-3 flex items-center gap-3">
