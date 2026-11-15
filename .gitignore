@@ -1,10 +1,5 @@
 node_modules/
+.env
 dist/
-*.tsbuildinfo
-.env
-.env.*
-!.env.example
-node_modules
-.env
-npm-debug.log*
-
+*.db
+*.db-journal
