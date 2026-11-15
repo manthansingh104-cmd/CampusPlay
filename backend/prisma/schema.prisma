@@ -1,41 +1,131 @@
 generator client {
   provider = "prisma-client-js"
 }
-
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
 }
-
-model Account {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
+model User {
+  id String @id @default(cuid())
+  name String
+  email String @unique
   passwordHash String
-  role         String   @default("student")
-  collegeId    String?
-  department   String?
-  year         String?
-  section      String?
-  sport        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-}
-
-model AppSnapshot {
-  id        String   @id
-  payload   String
-  revision Int      @default(1)
-  updatedAt DateTime @updatedAt
-}
-
-model AuditLog {
-  id        String   @id @default(cuid())
-  actorId   String
-  action    String
-  entity    String?
-  entityId  String?
-  metadata  String?
+  role String @default("student")
+  department String?
+  year String?
+  section String?
+  phone String?
+  avatar String?
   createdAt DateTime @default(now())
-  @@index([actorId, createdAt])
+  updatedAt DateTime @updatedAt
+  teams Team[] @relation("CaptainTeams")
+  registrations Registration[]
+  notifications Notification[]
+}
+model Tournament {
+  id String @id @default(cuid())
+  name String
+  sport String
+  description String?
+  format String @default("league")
+  status String @default("upcoming")
+  startDate DateTime?
+  endDate DateTime?
+  registrationDeadline DateTime?
+  venue String?
+  minPlayers Int @default(1)
+  maxPlayers Int?
+  rules String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  teams Team[]
+  registrations Registration[]
+  matches Match[]
+  standings Standing[]
+}
+model Team {
+  id String @id @default(cuid())
+  name String
+  department String?
+  captainId String
+  tournamentId String?
+  players Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  captain User @relation("CaptainTeams", fields:[captainId], references:[id])
+  tournament Tournament? @relation(fields:[tournamentId], references:[id], onDelete:SetNull)
+  registrations Registration[]
+  homeMatches Match[] @relation("HomeTeam")
+  awayMatches Match[] @relation("AwayTeam")
+  standings Standing[]
+}
+model Registration {
+  id String @id @default(cuid())
+  userId String
+  tournamentId String
+  teamId String?
+  type String @default("individual")
+  status String @default("pending")
+  note String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  tournament Tournament @relation(fields:[tournamentId], references:[id], onDelete:Cascade)
+  team Team? @relation(fields:[teamId], references:[id], onDelete:SetNull)
+  @@unique([userId,tournamentId])
+}
+model Match {
+  id String @id @default(cuid())
+  tournamentId String
+  homeTeamId String?
+  awayTeamId String?
+  scheduledAt DateTime?
+  venue String?
+  status String @default("upcoming")
+  homeScore Int @default(0)
+  awayScore Int @default(0)
+  homeOvers String?
+  awayOvers String?
+  notice String?
+  winnerTeamId String?
+  resultNote String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tournament Tournament @relation(fields:[tournamentId], references:[id], onDelete:Cascade)
+  homeTeam Team? @relation("HomeTeam",fields:[homeTeamId],references:[id],onDelete:SetNull)
+  awayTeam Team? @relation("AwayTeam",fields:[awayTeamId],references:[id],onDelete:SetNull)
+}
+model Notification {
+  id String @id @default(cuid())
+  userId String
+  title String
+  message String
+  type String @default("info")
+  read Boolean @default(false)
+  link String?
+  createdAt DateTime @default(now())
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+}
+model Standing {
+  id String @id @default(cuid())
+  tournamentId String
+  teamId String
+  played Int @default(0)
+  won Int @default(0)
+  lost Int @default(0)
+  drawn Int @default(0)
+  points Int @default(0)
+  updatedAt DateTime @updatedAt
+  tournament Tournament @relation(fields:[tournamentId],references:[id],onDelete:Cascade)
+  team Team @relation(fields:[teamId],references:[id],onDelete:Cascade)
+  @@unique([tournamentId,teamId])
+}
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String?
+  action String
+  entity String
+  entityId String?
+  metadata Json?
+  createdAt DateTime @default(now())
 }

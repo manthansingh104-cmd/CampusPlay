@@ -1,124 +1,42 @@
-# CampusPlay backend
+# CampusPlay Backend (Complete API Starter)
 
-A standalone REST API for the CampusPlay React frontend. Includes password-hashed accounts, JWT authentication, student/organizer roles, persistent SQLite storage, revision-checked app snapshots, profile management, organizer account administration, audit logs, request validation, rate limiting, Helmet security headers, and configurable CORS.
+Node.js + Express + Prisma + SQLite backend covering authentication, profiles, tournaments, teams/rosters, registrations, fixtures/live scores, results/standings, notifications, and organizer analytics.
 
 ## Requirements
-
-- Node.js 20+
+- Node.js 18+ (20+ recommended)
 - npm
 
-## Quick start
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set a unique `JWT_SECRET` (at least 32 characters) and a strong bootstrap organizer password. Then:
-
-```bash
+## Setup (Windows PowerShell)
+```powershell
+cd backend
+Copy-Item .env.example .env
 npm install
 npx prisma generate
 npx prisma migrate dev --name init
+npm run seed
 npm run dev
 ```
+API: `http://localhost:5000/api`; health: `http://localhost:5000/api/health`.
+Frontend `.env`: `VITE_API_BASE_URL=http://localhost:5000/api` (or `VITE_API_URL` if your client uses that name).
 
-API: `http://localhost:4000`  
-Health check: `GET http://localhost:4000/api/health`
+## Demo accounts
+- Organizer: `sports@campus.edu` / `password123`
+- Students: `student1@campus.edu` through `student12@campus.edu` / `password123`
 
-The optional bootstrap organizer is created only if `BOOTSTRAP_ORGANIZER_EMAIL` and `BOOTSTRAP_ORGANIZER_PASSWORD` are configured and that email does not already exist. Remove these values after first provisioning if desired. Public registration always creates a student; it cannot self-assign organizer privileges.
+## API groups
+- Auth: `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`
+- Users: `/users/profile`, `/users/change-password`, organizer `/users`
+- Tournaments: CRUD `/tournaments`, `/tournaments/:id/teams|fixtures|participants`
+- Teams: CRUD `/teams`, players, captain
+- Registrations: `/registrations`, `/registrations/my`, status approval
+- Matches: `/matches`, score patch, scheduling and venue conflict checks
+- Results: `/results`, `/results/:matchId`, `/results/leaderboard/:tournamentId`
+- Notifications: inbox, unread count, mark read/all
+- Analytics: dashboard, participation, performance
 
-## API
+All protected requests use `Authorization: Bearer <token>`. Organizer-only routes require role `organizer` or `admin`.
 
-All protected endpoints use `Authorization: Bearer <token>`.
-
-| Method | Endpoint | Access | Purpose |
-|---|---|---|---|
-| GET | `/api/health` | Public | Health check |
-| POST | `/api/auth/register` | Public | Create student account |
-| POST | `/api/auth/login` | Public | Login |
-| GET | `/api/auth/me` | Authenticated | Current account |
-| GET | `/api/data` | Authenticated | Read current CampusPlay snapshot |
-| PUT | `/api/data` | Organizer | Save snapshot with optional revision check |
-| PATCH | `/api/auth/profile` | Authenticated | Update own profile |
-| GET | `/api/admin/users` | Organizer | List accounts |
-| PATCH | `/api/admin/users/:id/role` | Organizer | Change account role |
-| GET | `/api/admin/audit-logs?limit=50` | Organizer | Read audit history |
-
-### Registration example
-
-```json
-{
-  "name": "Aarav Sharma",
-  "email": "aarav@example.com",
-  "password": "a-long-password",
-  "collegeId": "CP240101",
-  "department": "Computer Science",
-  "year": "2nd Year",
-  "section": "A"
-}
-```
-
-### Login response
-
-```json
-{
-  "user": { "id": "...", "name": "Aarav Sharma", "email": "aarav@example.com", "role": "student" },
-  "token": "..."
-}
-```
-
-### Snapshot persistence
-
-`GET /api/data` returns `{ "data": null, "revision": 0 }` until the first save. An organizer can persist the existing frontend's `AppData` object:
-
-```json
-{
-  "expectedRevision": 0,
-  "data": {
-    "version": 1,
-    "users": [],
-    "tournaments": [],
-    "teams": [],
-    "matches": [],
-    "registrations": [],
-    "notifications": [],
-    "session": null,
-    "theme": "light"
-  }
-}
-```
-
-The server returns a new revision. Send that revision as `expectedRevision` on the next save; a stale revision returns HTTP 409 rather than silently overwriting another organizer's changes. The snapshot intentionally preserves the frontend's existing data shape for an incremental migration.
-
-## Connect the frontend
-
-Add `VITE_API_URL=http://localhost:4000/api` to the frontend `.env`. Create an API client that stores the returned token and sends it as a Bearer token. Replace `signInDemo` with `/auth/login`, `addUser` with `/auth/register`, and replace localStorage persistence with `/data` requests. Keep the UI theme preference locally if desired. Do not send passwords or JWTs inside the app snapshot.
-
-Example client:
-
-```ts
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api';
-
-export async function api<T>(path: string, token?: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init.headers,
-    },
-  });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? 'Request failed');
-  return body as T;
-}
-```
-
-## Production notes
-
-- Use HTTPS and a strong secret manager-provided `JWT_SECRET`.
-- Set `CORS_ORIGIN` to the exact deployed frontend origin(s).
-- Back up the SQLite database file. For a multi-instance deployment, migrate the Prisma datasource to PostgreSQL and use a shared database.
-- Use a reverse proxy and persistent disk, or managed database storage.
-- Configure monitoring, backups, and a password reset/email verification provider before public launch.
-- This backend stores the app's domain state as a versioned JSON snapshot to preserve compatibility with the supplied frontend. It is not yet a normalized relational schema for each tournament, team, fixture, and registration. The current frontend also needs the API-client integration described above; the backend is not automatically wired into its React context.
+## Notes / limitations
+- SQLite is the default for quick local development. For production, configure an appropriate database provider and migrate the Prisma schema.
+- Password reset endpoints intentionally return 501 until an email provider/token delivery flow is configured.
+- The API is a complete domain backend starter, but frontend integration still requires checking your exact `src/services/*.ts` request shapes and adapting field names as needed. Run and test all flows before describing the deployment as production-ready.
